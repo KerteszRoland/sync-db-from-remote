@@ -1,0 +1,5 @@
+-- This SQL runs after schema and data are imported.
+-- Use ${VAR_NAME} syntax to reference variables from .env.local
+--
+-- Example:
+-- UPDATE settings SET api_url = '${DEV_API_URL}' WHERE key = 'api_url';
