@@ -69,18 +69,32 @@ docker run --rm \
 
 # Generate post-init wrapper script if post-init.sql exists
 if [ -f ./post-init.sql ]; then
+    echo "Copying post-init.sql template..."
+    cp ./post-init.sql ./sql/post-init.sql.template
+
     echo "Generating post-init wrapper..."
     cat > ./sql/03-post-init.sh << 'WRAPPER'
 #!/bin/sh
-if [ -f /post-init/post-init.sql ]; then
+TEMPLATE=/docker-entrypoint-initdb.d/post-init.sql.template
+if [ -f "$TEMPLATE" ]; then
     echo "Running post-init.sql with variable substitution..."
-    SQL=$(cat /post-init/post-init.sql)
+    SQL=$(cat "$TEMPLATE")
     # Replace ${VAR_NAME} patterns with environment variable values
     for var in $(env | cut -d= -f1); do
         val=$(eval echo "\$$var")
         SQL=$(echo "$SQL" | sed "s|\${${var}}|${val}|g")
     done
-    echo "$SQL" | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+    echo "Executing SQL:"
+    echo "$SQL"
+    echo "----------------------------------------"
+    if echo "$SQL" | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 2>&1; then
+        echo "post-init.sql completed successfully."
+    else
+        echo "ERROR: post-init.sql failed! Check the SQL above for issues."
+        exit 1
+    fi
+else
+    echo "No post-init.sql template found, skipping."
 fi
 WRAPPER
     chmod +x ./sql/03-post-init.sh
