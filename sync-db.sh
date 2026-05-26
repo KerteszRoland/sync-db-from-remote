@@ -35,10 +35,13 @@ REMOTE_DB_PORT=${REMOTE_DB_PORT:-5432}
 # Create sql directory if it doesn't exist
 mkdir -p ./sql
 
+# Drop legacy plain-SQL workflow artefacts (would run before / beside restore if left in place)
+rm -f ./sql/01-schema.sql ./sql/02-data.sql ./sql/03-post-init.sh
+
 echo "Connecting to remote database at $REMOTE_DB_HOST:$REMOTE_DB_PORT..."
 
-# Dump schema only (using Docker to run pg_dump)
-echo "Dumping schema to ./sql/01-schema.sql..."
+# Single custom-format dump (compressed archive). Local seed uses pg_restore, not psql COPY.
+echo "Dumping remote database to ./sql/seed.dump (custom format)..."
 docker run --rm \
     -e PGPASSWORD="$REMOTE_DB_PASSWORD" \
     -v "$(pwd)/sql:/dump" \
@@ -47,25 +50,53 @@ docker run --rm \
             -p "$REMOTE_DB_PORT" \
             -U "$REMOTE_DB_USER" \
             -d "$REMOTE_DB_NAME" \
-            --schema-only \
+            -Fc \
             --no-owner \
             --no-privileges \
-            -f /dump/01-schema.sql
+            -f /dump/seed.dump
 
-# Dump data only
-echo "Dumping data to ./sql/02-data.sql..."
-docker run --rm \
-    -e PGPASSWORD="$REMOTE_DB_PASSWORD" \
-    -v "$(pwd)/sql:/dump" \
-    postgres:18-alpine \
-    pg_dump -h "$REMOTE_DB_HOST" \
-            -p "$REMOTE_DB_PORT" \
-            -U "$REMOTE_DB_USER" \
-            -d "$REMOTE_DB_NAME" \
-            --data-only \
-            --no-owner \
-            --no-privileges \
-            -f /dump/02-data.sql
+echo "Writing ./sql/01-restore.sh..."
+cat > ./sql/01-restore.sh << 'RESTORE'
+#!/bin/sh
+set -e
+DUMP=/docker-entrypoint-initdb.d/seed.dump
+
+# pg_restore uses exit 1 for "completed with warnings" — treat as success
+pg_restore_wrap () {
+    pg_restore "$@" || {
+        r=$?
+        if [ "$r" -eq 1 ]; then
+            echo "pg_restore: completed with warnings (exit 1)."
+            return 0
+        fi
+        exit "$r"
+    }
+}
+
+echo "Restoring schema from seed.dump..."
+pg_restore_wrap \
+    --username="$POSTGRES_USER" \
+    --dbname="$POSTGRES_DB" \
+    --schema-only \
+    --no-owner \
+    --no-privileges \
+    --verbose \
+    "$DUMP"
+
+echo "Restoring data from seed.dump (triggers disabled for cyclic FKs)..."
+pg_restore_wrap \
+    --username="$POSTGRES_USER" \
+    --dbname="$POSTGRES_DB" \
+    --data-only \
+    --disable-triggers \
+    --no-owner \
+    --no-privileges \
+    --verbose \
+    "$DUMP"
+
+echo "Restore finished."
+RESTORE
+chmod +x ./sql/01-restore.sh
 
 # Generate post-init wrapper script if post-init.sql exists
 if [ -f ./post-init.sql ]; then
@@ -73,7 +104,7 @@ if [ -f ./post-init.sql ]; then
     cp ./post-init.sql ./sql/post-init.sql.template
 
     echo "Generating post-init wrapper..."
-    cat > ./sql/03-post-init.sh << 'WRAPPER'
+    cat > ./sql/02-post-init.sh << 'WRAPPER'
 #!/bin/sh
 TEMPLATE=/docker-entrypoint-initdb.d/post-init.sql.template
 if [ -f "$TEMPLATE" ]; then
@@ -97,10 +128,12 @@ else
     echo "No post-init.sql template found, skipping."
 fi
 WRAPPER
-    chmod +x ./sql/03-post-init.sh
+    chmod +x ./sql/02-post-init.sh
+else
+    rm -f ./sql/02-post-init.sh ./sql/post-init.sql.template
 fi
 
-echo "Done! SQL files have been saved to ./sql/"
+echo "Done! seed.dump and init scripts are in ./sql/"
 
 if [ "$RESTART" = true ]; then
     echo "Restarting Docker container..."
