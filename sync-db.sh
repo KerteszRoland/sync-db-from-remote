@@ -38,6 +38,17 @@ mkdir -p ./sql
 # Drop legacy plain-SQL workflow artefacts (would run before / beside restore if left in place)
 rm -f ./sql/01-schema.sql ./sql/02-data.sql ./sql/03-post-init.sh
 
+# Archive previous dump before overwriting (BACKUP_PREVIOUS_DUMP=true in .env)
+if [ "$BACKUP_PREVIOUS_DUMP" = "true" ] || [ "$BACKUP_PREVIOUS_DUMP" = "1" ] || [ "$BACKUP_PREVIOUS_DUMP" = "yes" ]; then
+    BACKUP_DIR=${DUMP_BACKUP_DIR:-./backup}
+    mkdir -p "$BACKUP_DIR"
+    if [ -f ./sql/seed.dump ]; then
+        backup_name="seed.dump.$(date +%Y%m%d-%H%M%S)"
+        echo "Archiving previous dump to $BACKUP_DIR/$backup_name..."
+        mv ./sql/seed.dump "$BACKUP_DIR/$backup_name"
+    fi
+fi
+
 echo "Connecting to remote database at $REMOTE_DB_HOST:$REMOTE_DB_PORT..."
 
 # Single custom-format dump (compressed archive). Local seed uses pg_restore, not psql COPY.

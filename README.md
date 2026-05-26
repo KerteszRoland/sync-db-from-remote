@@ -24,6 +24,9 @@ Local development database synced from the remote PostgreSQL instance.
    REMOTE_DB_USER=your_user
    REMOTE_DB_PASSWORD=your_password
 
+   # Optional: keep previous dumps in backup/ (timestamped seed.dump.*)
+   BACKUP_PREVIOUS_DUMP=false
+
    # Local Docker database
    POSTGRES_USER=dbuser
    POSTGRES_PASSWORD=localdb
@@ -80,6 +83,8 @@ DEV_API_URL=your-api-url
 
 To pull a fresh copy of the remote database, run `./sync-db.sh -r` again. The `-r` flag tears down the existing container (including its data volume) and starts a fresh one.
 
+Set `BACKUP_PREVIOUS_DUMP=true` in `.env` to move the existing `sql/seed.dump` into `backup/` (as `seed.dump.YYYYMMDD-HHMMSS`) before each sync instead of overwriting it. Override the folder with `DUMP_BACKUP_DIR` if needed.
+
 ## Files
 
 | File                 | Purpose                                                    |
@@ -88,7 +93,8 @@ To pull a fresh copy of the remote database, run `./sync-db.sh -r` again. The `-
 | `docker-compose.yml` | Local PostgreSQL container                                 |
 | `post-init.sql`      | SQL that runs after import, supports `${VAR}` substitution |
 | `.env`               | Connection credentials and substitution variables          |
-| `sql/`               | Generated SQL dump files (gitignored)                      |
+| `sql/`               | Generated dump and init scripts (gitignored)               |
+| `backup/`            | Archived previous dumps when `BACKUP_PREVIOUS_DUMP=true`   |
 
 ## License
 
